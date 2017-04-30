@@ -1,0 +1,285 @@
+---
+title: "NBA Field Goals"
+author: "Jason Katz"
+date: "12/16/2016"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(plyr)
+library(dplyr)
+library(data.table)
+library(datasets)
+library(ggplot2)
+library(graphics)
+library(grDevices)
+library(lattice)
+library(lubridate)
+library(manipulate)
+library(MASS)
+library(Matrix)
+library(methods)
+library(mosaic)
+library(mosaicData)
+library(psych)
+library(stats)
+library(stringr)
+library(utils)
+library(zoo)
+library(caret)
+library(class)
+library(rpart)
+library(e1071)
+library(klaR)
+library(mlbench)
+library(randomForest)
+library(Boruta)
+library(rjson)
+library(grid)
+library(jpeg)
+library(RCurl)
+library(jpeg)
+library(RColorBrewer)
+library(gsheet)
+library(gplots)
+library(viridis)
+```
+
+#Visualization of field goal percentage by zones
+```{r}
+#Read in the data
+data <- as.data.frame(gsheet2tbl('https://docs.google.com/spreadsheets/d/1BZwnqXGPS-cJW_J1gXK22lXHRmuyaeHcdMhiqFVFQWI/edit#gid=1869485836'))
+
+#Fix class of made basket for later analysis
+data$made <- as.factor(data$made)
+
+#Create new class of made basket for later computation
+data$made_numeric <- as.numeric(data$made)-1
+
+#Create new variable for horizontal distance to rim
+data$shot_x_abs <- abs(data$shot_x)
+
+#Create new variable for total distance from rim
+data$shot_distance <- (data$shot_x^2 + data$shot_y^2)^.5
+
+#Create new variable to categorize a shot as a two or a three
+data$shot_type <- as.factor(ifelse(data$shot_y < 9.25 & data$shot_x_abs > 22, 3, ifelse(data$shot_y > 9.25 & data$shot_distance > 23.75, 3, 2)))
+
+#Create a new variable to assign a points value to each shot (0, 2, 3)
+data$points <- (as.numeric(data$made)-1)*(as.numeric(data$shot_type)+1)
+
+#Create buckets for different range of defender distance
+data$closest_defender <- as.factor(ifelse(data$defender_distance >= 0 & data$defender_distance < 1, "0-1",ifelse(data$defender_distance >= 1 & data$defender_distance < 2, "1-2", ifelse(data$defender_distance >= 2 & data$defender_distance < 3, "2-3", ifelse(data$defender_distance >= 3 & data$defender_distance < 4, "3-4", ifelse(data$defender_distance >= 4 & data$defender_distance < 5, "4-5", ifelse(data$defender_distance >= 5 & data$defender_distance < 6, "5-6", ifelse(data$defender_distance >= 6 & data$defender_distance < 7, "6-7", ifelse(data$defender_distance >= 7 & data$defender_distance < 8, "7-8", ifelse(data$defender_distance >= 8 & data$defender_distance < 9, "8-9", ifelse(data$defender_distance >= 9 & data$defender_distance < 10, "9-10",  ifelse(data$defender_distance >= 10, "10+", "NA"))))))))))))
+
+#Create six different shot zones based on shot coordinates and other locatiom variables
+data$shot_zone <- as.factor(ifelse(data$shot_type == 3 & data$shot_y < 9.25 & data$shot_x > 0, "Right Corner Three", ifelse(data$shot_type == 3 & data$shot_y < 9.25 & data$shot_x < 0, "Left Corner Three", ifelse(data$shot_type == 3 & data$shot_y > 9.25 & data$shot_y < 42.25, "Above the Break Three", ifelse(data$shot_x_abs > 8 & data$shot_type == 2 | data$shot_y > 14.25 & data$shot_type == 2, "Mid-Range", ifelse(data$shot_distance < 4, "Restricted Area", ifelse(data$shot_x_abs < 8 & data$shot_y < 14.25 & data$shot_distance > 4, "Paint (Not RA)", "Backcourt")))))))
+
+#Upload half court image from internet
+courtImg.URL <- "http://www.sawyoo.com/postpic/2011/05/nba-basketball-court-dimensions_97440.jpg"
+
+#Save image
+court <- rasterGrob(readJPEG(getURLContent(courtImg.URL)), width=unit(1,"npc"), height=unit(1,"npc"))
+
+#Create new dataframe for only shots in the frontcourt
+data_half_court <- data[which(!data$shot_zone=='Backcourt'), ]
+
+#Create new dataframe to calculate statistics for each shot zone
+data_shots <- ddply(data_half_court, .(shot_zone), summarize, shots_attempted = length(made), shots_made = sum(made_numeric))
+
+#Calculate field field goal percentage for each shot zone
+data_shots$field_goal_percentage <- (data_shots$shots_made / data_shots$shots_attempted)
+
+#Fix format
+data_shots$field_goal_percentage <- paste(as.character(round(100 * data_shots$field_goal_percentage, 1)), "%", sep="")
+
+#Categorize each shot zone as either a two or three (for further calculations)
+data_shots$type <- ifelse(data_shots$shot_zone == "Above the Break Three", 3, ifelse(data_shots$shot_zone == "Left Corner Three", 3, ifelse(data_shots$shot_zone == "Right Corner Three", 3, 2)))
+
+#Calculate point per shot for each shot zone
+data_shots$points_per_shot <- round(data_shots$type*data_shots$shots_made/data_shots$shots_attempted, 2)
+
+#Calculate effective field goal percetange for each shot zone
+data_shots$eFG <- round(ifelse(data_shots$type == 2, data_shots$shots_made/data_shots$shots_attempted, 1.5*data_shots$shots_made/data_shots$shots_attempted), 3)
+
+#Fix format
+data_shots$eFG <- paste(as.character(round(100 * data_shots$eFG, 1)), "%", sep="")
+
+#Location for graphical purposes
+data_shots$x <- ifelse(data_shots$shot_zone == "Above the Break Three", 12, ifelse(data_shots$shot_zone == "Left Corner Three", 21, ifelse(data_shots$shot_zone == "Right Corner Three", -21, ifelse(data_shots$shot_zone == "Mid-Range", -13, ifelse(data_shots$shot_zone == "Paint (Not RA)", 0, 0)))))
+
+#Location for graphical purposes
+data_shots$y <- ifelse(data_shots$shot_zone == "Above the Break Three", 25, ifelse(data_shots$shot_zone == "Left Corner Three", 0, ifelse(data_shots$shot_zone == "Right Corner Three", 0, ifelse(data_shots$shot_zone == "Mid-Range", 10, ifelse(data_shots$shot_zone == "Paint (Not RA)", 12, 3)))))
+
+par(xpd=TRUE)
+
+#Graph showing field goal percentages of each shot zone
+ggplot(data_shots, aes(x=x, y=y)) + annotation_custom(court, -25, 25, -4.75, 42.25) + geom_point(aes(colour = shot_zone, alpha = .8), size = 50) + geom_text(aes(colour = shot_zone, label = data_shots$field_goal_percentage), vjust = .2, size = 12, color = "black", fontface = "bold") + geom_text(aes(colour = shot_zone, label = paste(data_shots$shots_made, "of", data_shots$shots_attempted, sep = " ")), vjust = 3, hjust = .5, size = 5, color = "black") + guides(alpha = FALSE, size = FALSE, colour = guide_legend(override.aes = list(size=5, alpha = 1))) + xlim(-25, 25) + ylim(-4.75, 42.25) + coord_fixed() + theme(line = element_blank(), axis.title.x = element_blank(), axis.title.y = element_blank(), axis.text.x = element_blank(), axis.text.y = element_blank(), legend.title = element_blank(), legend.text=element_text(size = 14), legend.position = c(0.2, 0.775), legend.background = element_rect(fill=0), legend.key.size = unit(1.2, "cm"), plot.title = element_text(size = 17, lineheight = 1.2, face = "bold")) 
+```
+
+#Heatmap of field goal percentage by zones and defender distance
+```{r}
+#Create new dataframe for further analysis
+data_half_court_4_zones <- data_half_court
+
+#Create four shot zones
+data_half_court_4_zones$shot_zone <- as.factor(ifelse(data_half_court_4_zones$shot_type == 3, "Three", ifelse(data_half_court_4_zones$shot_x_abs > 8 & data_half_court_4_zones$shot_type == 2 | data_half_court_4_zones$shot_y > 14.25 & data_half_court_4_zones$shot_type == 2, "Mid-Range", ifelse(data_half_court_4_zones$shot_distance < 4, "Restricted Area", ifelse(data_half_court_4_zones$shot_x_abs < 8 & data_half_court_4_zones$shot_y < 14.25 & data_half_court_4_zones$shot_distance > 4, "Paint (Not RA)", "Backcourt")))))
+
+#Create dataframes based on defender distance for further analysis
+`data_0-1` <- filter(data_half_court_4_zones, data_half_court_4_zones$closest_defender == "0-1")
+`data_1-2` <- filter(data_half_court_4_zones, data_half_court_4_zones$closest_defender == "1-2")
+`data_2-3` <- filter(data_half_court_4_zones, data_half_court_4_zones$closest_defender == "2-3")
+`data_3-4` <- filter(data_half_court_4_zones, data_half_court_4_zones$closest_defender == "3-4")
+`data_4-5` <- filter(data_half_court_4_zones, data_half_court_4_zones$closest_defender == "4-5")
+`data_5-6` <- filter(data_half_court_4_zones, data_half_court_4_zones$closest_defender == "5-6")
+
+#Assign names of dataframes for later parsing
+Distances <- c("data_0-1", "data_1-2", "data_2-3", "data_3-4", "data_4-5", "data_5-6")
+
+#Assign names of categories for later variable assignemnt
+Zones <- c("Three", "Mid-Range", "Paint (Not RA)", "Restricted Area")
+
+#Create new datafranes segmenting each court zone by defender range 
+for (i in Distances) {
+  for (j in Zones) {
+  zones <- paste(i, j, sep = "_")
+  d=get(i)
+  assign(zones, filter(d, d$shot_zone == j))
+  }
+}
+
+#Combine dataframes into one
+zone_vs_distance <- ddply(data_half_court_4_zones, .(shot_zone), summarize, `0-1` = 0, `1-2` = 0, `2-3` = 0, `3-4` = 0, `4-5` = 0, `5-6` = 0)
+
+#Assign row names
+rownames(zone_vs_distance) <- c("Three", "Mid-Range", "Paint (Not RA)", "Restricted Area")
+
+#Format
+zone_vs_distance <- zone_vs_distance[,-1]
+
+#Upload statistics from dataframes into new dataframe
+zone_vs_distance$`0-1` <- c(sum(`data_0-1_Three`$made_numeric)/length(`data_0-1_Three`$made), sum(`data_0-1_Mid-Range`$made_numeric)/length(`data_0-1_Mid-Range`$made), sum(`data_0-1_Paint (Not RA)`$made_numeric)/length(`data_0-1_Paint (Not RA)`$made), sum(`data_0-1_Restricted Area`$made_numeric)/length(`data_0-1_Restricted Area`$made))
+
+zone_vs_distance$`0-1` <- round(zone_vs_distance$`0-1`, 2)
+
+zone_vs_distance$`1-2` <- c(sum(`data_1-2_Three`$made_numeric)/length(`data_1-2_Three`$made), sum(`data_1-2_Mid-Range`$made_numeric)/length(`data_1-2_Mid-Range`$made), sum(`data_1-2_Paint (Not RA)`$made_numeric)/length(`data_1-2_Paint (Not RA)`$made), sum(`data_1-2_Restricted Area`$made_numeric)/length(`data_1-2_Restricted Area`$made))
+
+zone_vs_distance$`1-2` <- round(zone_vs_distance$`1-2`, 2)
+
+zone_vs_distance$`2-3` <- c(sum(`data_2-3_Three`$made_numeric)/length(`data_2-3_Three`$made), sum(`data_2-3_Mid-Range`$made_numeric)/length(`data_2-3_Mid-Range`$made), sum(`data_2-3_Paint (Not RA)`$made_numeric)/length(`data_2-3_Paint (Not RA)`$made), sum(`data_2-3_Restricted Area`$made_numeric)/length(`data_2-3_Restricted Area`$made))
+
+zone_vs_distance$`2-3` <- round(zone_vs_distance$`2-3`, 2)
+
+zone_vs_distance$`3-4` <- c(sum(`data_3-4_Three`$made_numeric)/length(`data_3-4_Three`$made), sum(`data_3-4_Mid-Range`$made_numeric)/length(`data_3-4_Mid-Range`$made), sum(`data_3-4_Paint (Not RA)`$made_numeric)/length(`data_3-4_Paint (Not RA)`$made), sum(`data_3-4_Restricted Area`$made_numeric)/length(`data_3-4_Restricted Area`$made))
+
+zone_vs_distance$`3-4` <- round(zone_vs_distance$`3-4`, 2)
+
+zone_vs_distance$`4-5` <- c(sum(`data_4-5_Three`$made_numeric)/length(`data_4-5_Three`$made), sum(`data_4-5_Mid-Range`$made_numeric)/length(`data_4-5_Mid-Range`$made), sum(`data_4-5_Paint (Not RA)`$made_numeric)/length(`data_4-5_Paint (Not RA)`$made), sum(`data_4-5_Restricted Area`$made_numeric)/length(`data_4-5_Restricted Area`$made))
+
+zone_vs_distance$`4-5` <- round(zone_vs_distance$`4-5`, 2)
+
+zone_vs_distance$`5-6` <- c(sum(`data_5-6_Three`$made_numeric)/length(`data_5-6_Three`$made), sum(`data_5-6_Mid-Range`$made_numeric)/length(`data_5-6_Mid-Range`$made), sum(`data_5-6_Paint (Not RA)`$made_numeric)/length(`data_5-6_Paint (Not RA)`$made), sum(`data_5-6_Restricted Area`$made_numeric)/length(`data_5-6_Restricted Area`$made))
+
+zone_vs_distance$`5-6` <- round(zone_vs_distance$`5-6`, 2)
+
+#Format
+zone_vs_distance <- data.matrix(zone_vs_distance)
+
+#Create breaks for heatmap
+col_breaks = c(seq(-1,0,length=100), seq(0.01,0.33,length=100), seq(0.34,0.66,length=100), seq(0.67,1,length=100)) 
+
+#Create heatmap for field goal percentage by shot zone and defender distance
+heatmap.2(zone_vs_distance, cellnote = zone_vs_distance, notecol="black", density.info="none", trace="none", margins =c(7,13.5), col="plasma", breaks=col_breaks, dendrogram="none", Colv="NA", lwid=c(.3,9), lhei=c(3,12.5), cexRow = 2, key = FALSE, main = "FG% by Shot Zone and Defender Distance", notecex = 5, xlab = "Defender Distance", Rowv=FALSE, cexCol = 2)
+```
+
+#Hypotheses and t test results
+```{r}
+#Effective Field Goal Percentage of Threes vs Mid_Range Shots
+t.test(filter(data_half_court, data_half_court$shot_type == 3)$made_numeric*1.5, filter(data_half_court, data_half_court$shot_zone == "Mid-Range")$made_numeric, conf.level = .99, alternative = 'greater')
+
+#Field Goal Percentage of Contested Layups vs Open Mid-Range Shots
+t.test(filter(data_half_court, data_half_court$defender_distance < 2 & data_half_court$shot_zone == "Restricted Area")$made_numeric, filter(data_half_court, data_half_court$defender_distance > 6 & data_half_court$shot_zone == "Mid-Range")$made_numeric, conf.level = .99, alternative = 'greater')
+
+#Field Goal Percentage of threes contested within .5-2.5 feet vs 2.5-4.5 feet
+t.test(filter(data_half_court, data_half_court$defender_distance > 2.5 & data_half_court$defender_distance < 4.5 & data_half_court$shot_type == 3)$made_numeric, filter(data_half_court, data_half_court$defender_distance > .5 & data_half_court$defender_distance < 2.5 & data_half_court$shot_type == 3)$made_numeric, conf.level = .99, alternative = 'greater')
+
+#Field Goal Percentage of Pull Up Threes vs Catch and Shoot Threes
+t.test(filter(data_half_court, data_half_court$dribbles_before == 0 & data_half_court$shot_type == 3)$made_numeric, filter(data_half_court, data_half_court$dribbles_before > 0 & data_half_court$shot_type == 3)$made_numeric, conf.level = .99, alternative = 'greater')
+
+#Field Goal Percentage of threes while moving fast vs more stationary threes
+t.test(filter(data_half_court, data_half_court$shooter_velocity_ft_sec < 9 & data_half_court$shot_type == 3 & data_half_court$shot_distance < 27)$made_numeric, filter(data_half_court, data_half_court$shooter_velocity_ft_sec > 9 & data_half_court$shot_type == 3 & data_half_court$shot_distance < 27)$made_numeric, conf.level = .99, alternative = 'greater')
+
+#Field Goal Percentage of layups contested within 2-4 feet vs 4-6 feet
+t.test(filter(data_half_court, data_half_court$defender_distance > 4 & data_half_court$defender_distance < 6, data_half_court$shot_zone == "Restricted Area")$made_numeric, filter(data_half_court, data_half_court$defender_distance > 2 & data_half_court$defender_distance < 4 & data_half_court$shot_zone == "Restricted Area")$made_numeric, conf.level = .99, alternative = 'greater')
+
+#Effective Field Goal Percentage of open catch and shoot threes vs contested drives to the paint
+t.test(filter(data_half_court, data_half_court$dribbles_before == 0 & data_half_court$defender_distance > 5 & data_half_court$shot_type == 3)$made_numeric*1.5, filter(data_half_court, data_half_court$dribbles_before > 0 & data_half_court$defender_distance < 2 & data_half_court$shot_zone == "Paint (Not RA)")$made_numeric, conf.level = .99, alternative = 'greater')
+```
+
+#Naive Bayes model to predict probability of a made shot
+```{r}
+#New dataframe from previous data
+data_10_zones <- data
+
+#Create ten different shot zones
+data_10_zones$shot_zone <- as.factor(ifelse(data_10_zones$shot_type == 3 & data_10_zones$shot_y < 9.25 & data_10_zones$shot_x > 0, "Right Corner Three", ifelse(data_10_zones$shot_type == 3 & data_10_zones$shot_y < 9.25 & data_10_zones$shot_x < 0, "Left Corner Three", ifelse(data_10_zones$shot_type == 3 & data_10_zones$shot_y > 9.25 & data_10_zones$shot_y < 42.25 & data_10_zones$shot_distance < 27 & data_10_zones$shot_distance > 6, "Above the Break Three", ifelse(data_10_zones$shot_x_abs > 8 & data_10_zones$shot_type == 2 & data_10_zones$shot_distance < 20 | data_10_zones$shot_y > 14.25 & data_10_zones$shot_type == 2 & data_10_zones$shot_distance < 20 , "Mid-Range", ifelse(data_10_zones$shot_x_abs > 8 & data_10_zones$shot_type == 2 | data_10_zones$shot_y > 14.25 & data_10_zones$shot_type == 2, "Deep Two", ifelse(data_10_zones$shot_distance < 4, "Restricted Area", ifelse(data_10_zones$shot_x_abs < 8 & data_10_zones$shot_y < 14.25 & data_10_zones$shot_distance > 4 & data_10_zones$shot_distance < 6, "Close Paint (Not RA)", ifelse(data_10_zones$shot_x_abs < 8 & data_10_zones$shot_y < 14.25 & data_10_zones$shot_distance > 4 & data_10_zones$shot_distance > 6, " Deep Paint (Not RA)", ifelse(data_10_zones$shot_type == 3 & data_10_zones$shot_y > 9.25 & data_10_zones$shot_y < 42.25 & data_10_zones$shot_distance > 27, "Deep Three", "Backcourt"))))))))))
+
+#5 fold cross validation with 5 repeats
+for (i in 1:5) {
+folds <- createFolds(data_10_zones$made, k = 5)
+
+train1 <- data_10_zones[c(folds[[2]], folds[[3]], folds[[4]], folds[[5]]), ]
+
+train2 <- data_10_zones[c(folds[[1]], folds[[3]], folds[[4]], folds[[5]]), ]
+
+train3 <- data_10_zones[c(folds[[2]], folds[[1]], folds[[4]], folds[[5]]), ]
+
+train4 <- data_10_zones[c(folds[[1]], folds[[3]], folds[[2]], folds[[5]]), ]
+
+train5 <- data_10_zones[c(folds[[2]], folds[[1]], folds[[3]], folds[[4]]), ]
+
+test1 <- data_10_zones[folds[[1]], ]
+
+test2 <- data_10_zones[folds[[2]], ]
+
+test3 <- data_10_zones[folds[[3]], ]
+
+test4 <- data_10_zones[folds[[4]], ]
+
+test5 <- data_10_zones[folds[[5]], ]
+
+nb_class_1 <- naiveBayes(made ~ defender_distance + shot_zone, data = train1)
+
+nb_predictions_1 <- predict(nb_class_1, test1, type = 'class')
+
+accuracy_1 <- mean(nb_predictions_1 == test1$made)
+
+nb_class_2 <- naiveBayes(made ~ defender_distance + shot_zone, data = train2)
+
+nb_predictions_2 <- predict(nb_class_2, test2, type = 'class')
+
+accuracy_2 <- mean(nb_predictions_2 == test2$made)
+
+nb_class_3 <- naiveBayes(made ~ defender_distance + shot_zone, data = train3)
+
+nb_predictions_3 <- predict(nb_class_3, test3, type = 'class')
+
+accuracy_3 <- mean(nb_predictions_3 == test3$made)
+
+nb_class_4 <- naiveBayes(made ~ defender_distance + shot_zone, data = train4)
+
+nb_predictions_4 <- predict(nb_class_4, test4, type = 'class')
+
+accuracy_4 <- mean(nb_predictions_4 == test4$made)
+
+nb_class_5 <- naiveBayes(made ~ defender_distance + shot_zone, data = train5)
+
+nb_predictions_5 <- predict(nb_class_5, test5, type = 'class')
+
+accuracy_5 <- mean(nb_predictions_5 == test5$made)
+
+accuracy.rating <- paste("accuracy", i, sep = ".")
+assign(accuracy.rating, (accuracy_1 + accuracy_2 + accuracy_3 + accuracy_4 + accuracy_5)/5)
+}
+#Accuracy of model
+(accuracy.1 + accuracy.2 + accuracy.3 + accuracy.4 + accuracy.5)/5
