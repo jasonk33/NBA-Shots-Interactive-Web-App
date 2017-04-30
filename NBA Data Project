@@ -1,0 +1,108 @@
+using DataArrays, DataFrames
+data=readtable("/Users/JasonKatz/Desktop/Random/OKC Thunder Data Science Project/NBA_data.csv")
+data[:shot_distance] = ((data[:shot_x]).^2 + (data[:shot_y]).^2).^.5
+data[:shot_x_abs] = abs(data[:shot_x])
+data[:shot_type] = ifelse((data[:shot_y] .< 9.25) & (data[:shot_x_abs] .> 22), 3, ifelse((data[:shot_y] .> 9.25) & (data[:shot_distance] .> 23.75), 3, 2))
+data[:closest_defender] = ifelse((data[:defender_distance] .>= 0) & (data[:defender_distance] .< 1), "0-1",ifelse((data[:defender_distance] .>= 1) & (data[:defender_distance] .< 2), "1-2", ifelse((data[:defender_distance] .>= 2) & (data[:defender_distance] .< 3), "2-3", ifelse((data[:defender_distance] .>= 3) & (data[:defender_distance] .< 4), "3-4", ifelse((data[:defender_distance] .>= 4) & (data[:defender_distance] .< 5), "4-5", ifelse((data[:defender_distance] .>= 5) & (data[:defender_distance] .< 6), "5-6", ifelse((data[:defender_distance] .>= 6) & (data[:defender_distance] .< 7), "6-7", ifelse((data[:defender_distance] .>= 7) & (data[:defender_distance] .< 8), "7-8", ifelse((data[:defender_distance] .>= 8) & (data[:defender_distance] .< 9), "8-9", ifelse((data[:defender_distance] .>= 9) & (data[:defender_distance] .< 10), "9-10",  ifelse((data[:defender_distance] .>= 10), "10+", "NA")))))))))))
+pool!(data, :closest_defender)
+data[:made_factor] = data[:made]
+pool!(data,:made_factor)
+data[:points] = (data[:made]).*(data[:shot_type])
+data[:shot_zone] = ifelse((data[:shot_type] .== 3) & (data[:shot_y] .< 9.25) & (data[:shot_x] .> 0), "Right Corner Three", ifelse((data[:shot_type] .== 3) & (data[:shot_y] .< 9.25) & (data[:shot_x] .< 0), "Left Corner Three", ifelse((data[:shot_type] .== 3) & (data[:shot_y] .> 9.25) & (data[:shot_y] .< 42.25), "Above the Break Three", ifelse((data[:shot_x_abs] .> 8) & (data[:shot_type] .== 2) | (data[:shot_y] .> 14.25) & (data[:shot_type] .== 2), "Mid-Range", ifelse((data[:shot_distance] .< 4), "Restricted Area", ifelse((data[:shot_x_abs] .< 8) & (data[:shot_y] .< 14.25) & (data[:shot_distance] .> 4), "Paint (Not RA)", "Backcourt"))))))
+data_half_court = data[data[:shot_zone] .!="Backcourt", :]
+shot_zones = levels(data[:shot_zone])
+data_shots = DataFrame(shots_zones = [shot_zones[1],shot_zones[2],shot_zones[3],shot_zones[4],shot_zones[6],shot_zones[7]])
+data_shots[:shots_attempted] = [size(data[data[:shot_zone] .=="Mid-Range", :],1),size(data[data[:shot_zone] .=="Paint (Not RA)", :],1),size(data[data[:shot_zone] .=="Above the Break Three", :],1),size(data[data[:shot_zone] .=="Restricted Area", :],1),size(data[data[:shot_zone] .=="Right Corner Three", :],1),size(data[data[:shot_zone] .=="Left Corner Three", :],1)]
+data_shots[:shots_made] = [size(data[(data[:shot_zone] .=="Mid-Range") & (data[:made] .==1), :],1),size(data[(data[:shot_zone] .=="Paint (Not RA)") & (data[:made] .==1), :],1),size(data[(data[:shot_zone] .=="Above the Break Three") & (data[:made] .==1), :],1),size(data[(data[:shot_zone] .=="Restricted Area") & (data[:made] .==1), :],1),size(data[(data[:shot_zone] .=="Right Corner Three") & (data[:made] .==1), :],1),size(data[(data[:shot_zone] .=="Left Corner Three") & (data[:made] .==1), :],1)]
+data_shots[:field_goal_percentage] = data_shots[:shots_made]./data_shots[:shots_attempted]
+data_shots[:points_per_shot] = round([data_shots[1,4]*2,data_shots[2,4]*2,data_shots[3,4]*3,data_shots[4,4]*2,data_shots[5,4]*3,data_shots[6,4]*3],2)
+data_shots[:eFG] = [data_shots[1,4],data_shots[2,4],data_shots[3,4]*1.5,data_shots[4,4],data_shots[5,4]*1.5,data_shots[6,4]*1.5]
+data_shots[4] = String[string(x) for x in round(data_shots[4]*100,1)] .* "%"
+data_shots[6] = String[string(x) for x in round(data_shots[6]*100,1)] .* "%"
+data_shots[:x] = [-13,0,12,0,-21,21]
+data_shots[:y] = [10,12,25,3,0,0]
+data_shots
+data
+
+
+using PlotlyJS
+
+trace2 = scatter()
+    x0 = [-25,   25, -25, -25, 7, -7, -7, -22, 22]
+    y0 = [-4.75,   -4.75, 42.25, -4.75, -4.75, -4.75, 14.25, -4.75, -4.75]
+    x1 = [-25,   25, 25, 25, 7, -7, 7, -22 ,22]
+    y1 = [42.5, 42.5, 42.25, -4.75, 14.25, 14.25, 14.25, 9.25, 9.25]
+    #shape = circle(-6,8.25,6,20.25)
+    circle() = PlotlyJS.circle()
+
+    lines00 = line(x0, x1, y0, y1; xref="x", yref="y")
+
+lines1  = line(-22,-22,-4.75,9.25)
+lines2 =  line(22,22,-4.75,9.25)
+circle1 = PlotlyJS.circle(-6,6,8.25,20.25)
+circle2 = PlotlyJS.circle(-22,22,-20.25,23.75,yaxis_range=[9.25,23.75])
+circle3 = PlotlyJS.circle(-4,4,1,9,opacity=.3,fillcolor="blue")
+circle4 = PlotlyJS.circle(-4,4,9,17,opacity=.3,fillcolor="green")
+circle5 = PlotlyJS.circle(-17,-9,7,15,opacity=.3,fillcolor="yellow")
+circle6 = PlotlyJS.circle(-23,-15,-4.5,3.5,opacity=.3,fillcolor="pink")
+circle7 = PlotlyJS.circle(15,23,-4.5,3.5,opacity=.3,fillcolor="orange")
+circle8 = PlotlyJS.circle(7,15,20,28,opacity=.3,fillcolor="red")
+rect1 = rect(-25,25,-4.75,42.5)
+rect2 = rect(-7,7,-4.75,14.25)
+
+trace1 = scatter(x=[-13,0,11,0,-19,19],y=[12,14,25,6,.5,.5],mode="text",text=[data_shots[1,4],data_shots[2,4],data_shots[3,4],data_shots[4,4],data_shots[5,4],data_shots[6,4]],textfont_size=12)
+
+
+trace2 = scatter(x=[-13,0,11,0,-19,19],y=[10,12,23,4,-1.5,-1.5],mode="text",text=["$(data_shots[1,3]) of $(data_shots[1,2])","$(data_shots[2,3]) of $(data_shots[2,2])","$(data_shots[3,3]) of $(data_shots[3,2])","$(data_shots[4,3]) of $(data_shots[4,2])","$(data_shots[5,3]) of $(data_shots[5,2])","$(data_shots[6,3]) of $(data_shots[6,2])"],textfont_size=8)
+
+    plot([trace1,trace2],
+          Layout(;shapes=[circle1,circle2,rect1,rect2,lines1,lines2,circle3,circle4,circle5,circle6,circle7,circle8], xaxis_range=[-25.5, 25.5], yaxis_range=[-5.32, 43],showlegend=false))
+
+
+
+
+using HypothesisTests
+
+
+UnequalVarianceTTest(data[data[:shot_type].==3,:made]*1.5,data[data[:shot_zone].=="Mid-Range",:made])
+UnequalVarianceTTest(data[(data[:defender_distance].<2) & (data[:shot_zone].=="Restricted Area"),:made],data[(data[:defender_distance].>6) & (data[:shot_zone].=="Mid-Range"),:made])
+UnequalVarianceTTest(data[(data[:defender_distance].>2.5) & (data[:defender_distance].<4.5) & (data[:shot_type].==3),:made],data[(data[:defender_distance].>.5) & (data[:defender_distance].<2.5) & (data[:shot_type].==3),:made])
+UnequalVarianceTTest(data[(data[:dribbles_before].==0) & (data[:shot_type].==3),:made],data[(data[:dribbles_before].>0) & (data[:shot_type].==3),:made])
+UnequalVarianceTTest(data[(data[:shooter_velocity_ft_sec].<9) & (data[:shot_type].==3) & (data[:shot_distance].<27),:made],data[(data[:shooter_velocity_ft_sec].>9) & (data[:shot_type].==3) & (data[:shot_distance].<27),:made])
+
+
+
+
+
+
+xx = convert(Array{Float64}, data[:shot_x])
+yy = convert(Array{Float64}, data[:shot_y])
+layout = Layout(xaxis_range=[--24.9, 25.5], yaxis_range=[-5.32, 42.25])
+plot(scatter(;x=xx[:], y=yy[:], mode="markers"),layout)
+
+convert(Array{Float64}, data[:shot_distance])
+
+
+using RCall, RDatasets, Winston
+R"rnorm(10)"
+R"library(grid)"
+R"library(jpeg)"
+R"library(RCurl)"
+R"library(ggplot2)"
+R"courtImg.URL = 'http://www.sawyoo.com/postpic/2011/05/nba-basketball-court-dimensions_97440.jpg'"
+R"court = rasterGrob(readJPEG(getURLContent(courtImg.URL)), width=unit(1,'npc'), height=unit(1,'npc'))"
+globalEnv[:data] = data
+globalEnv[:data_shots] = data_shots
+R"ggplot(data_shots, aes(x, y)) + annotation_custom(court, -25, 25, -4.75, 42.25) + geom_point(aes(colour = shots_zones, alpha = .8), size = 50) + geom_text(aes(colour = shot_zone, label = data_shots$field_goal_percentage), vjust = .2, size = 12, color = 'black', fontface = 'bold') + geom_text(aes(colour = shot_zone, label = paste(data_shots$shots_made, 'of', data_shots$shots_attempted, sep = ' ')), vjust = 3, hjust = .5, size = 5, color = 'black') + guides(alpha = FALSE, size = FALSE, colour = guide_legend(override.aes = list(size=5, alpha = 1))) + xlim(-25, 25) + ylim(-4.75, 42.25) + coord_fixed() + theme(line = element_blank(), axis.title.x = element_blank(), axis.title.y = element_blank(), axis.text.x = element_blank(), axis.text.y = element_blank(), legend.title = element_blank(), legend.text=element_text(size = 14), legend.position = c(0.2, 0.775), legend.background = element_rect(fill=0), legend.key.size = unit(1.2, 'cm'), plot.title = element_text(size = 17, lineheight = 1.2, face = 'bold'))"
+
+
+
+
+
+
+
+
+
+using Winston
+pl = plot(cumsum(rand(500) .- 0.5), "r", cumsum(rand(500) .- 0.5), "b")
+display(pl)
